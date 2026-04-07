@@ -307,4 +307,4 @@ def health():
         "empresa":  "JABES Avalúos y Proyectos SC",
         "apify":    "conectado" if APIFY_TOKEN else "sin token",
         "openai":   "conectado" if OPENAI_KEY else "sin token",
-    }
+    }  
