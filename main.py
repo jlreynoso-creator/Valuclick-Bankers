@@ -125,6 +125,15 @@ async def buscar_apify(params: SearchParams) -> list:
 
             precio_m2 = round(precio / max(metros, 1)) if metros > 0 else 0
 
+            # Construir URL completa del anuncio
+            raw_url = item.get("url") or item.get("link") or item.get("href") or ""
+            if raw_url.startswith("/"):
+                full_url = "https://www.inmuebles24.com" + raw_url
+            elif raw_url.startswith("http"):
+                full_url = raw_url
+            else:
+                full_url = "#"
+
             comparables.append({
                 "portal":    "Inmuebles24",
                 "titulo":    item.get("title") or item.get("name") or "",
@@ -135,7 +144,7 @@ async def buscar_apify(params: SearchParams) -> list:
                 "antiguedad": 10,
                 "colonia":   params.colonia or params.ciudad,
                 "ciudad":    params.ciudad,
-                "url":       item.get("url") or "#",
+                "url":       full_url,
                 "score":     0,
             })
         except Exception as e:
@@ -307,4 +316,4 @@ def health():
         "empresa":  "JABES Avalúos y Proyectos SC",
         "apify":    "conectado" if APIFY_TOKEN else "sin token",
         "openai":   "conectado" if OPENAI_KEY else "sin token",
-    }  
+    }
