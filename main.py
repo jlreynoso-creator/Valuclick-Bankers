@@ -11,7 +11,7 @@ import asyncio, httpx, os, statistics
 
 APIFY_TOKEN  = os.getenv("APIFY_TOKEN", "")
 OPENAI_KEY   = os.getenv("OPENAI_API_KEY", "")
-ACTOR_ID     = "ecomscrape~inmuebles24-property-listings-scraper"
+ACTOR_ID     = "azzouzana~inmuebles24-scraper-pro-by-search-url"
 FACTOR_AJUSTE = 0.95  # Factor de negociación IMV
 
 app = FastAPI(title="ValuaClick API", version="2.0.0")
@@ -66,7 +66,11 @@ async def buscar_apify(params: SearchParams) -> list:
                 json={
                     "startUrls": [{"url": url}],
                     "maxItems": 20,
-                    "proxyConfiguration": {"useApifyProxy": True}
+                    "proxyConfiguration": {
+                        "useApifyProxy": True,
+                        "apifyProxyGroups": ["RESIDENTIAL"],
+                        "apifyProxyCountry": "MX"
+                    }
                 }
             )
             if run_resp.status_code not in (200, 201):
