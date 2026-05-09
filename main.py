@@ -1,323 +1,478 @@
-# ============================================================
-# ValuaClick Backend v2.0 — FastAPI + Apify (Inmuebles24 real)
-# Metodología: Comparativa de mercado + Factor ajuste 0.95
-# JABES Avalúos y Proyectos SC — valuaclick.mx
-# ============================================================
-from fastapi import FastAPI
+from fastapi import FastAPI, Depends, HTTPException, status, Header, Request
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker, Session
+from pydantic import BaseModel, EmailStr
 from typing import Optional
-import asyncio, httpx, os, statistics
+from datetime import datetime, timedelta
+import stripe
+import json
+import os
+import logging
 
-APIFY_TOKEN  = os.getenv("APIFY_TOKEN", "")
-OPENAI_KEY   = os.getenv("OPENAI_API_KEY", "")
-ACTOR_ID     = "azzouzana~inmuebles24-scraper-pro-by-search-url"
-FACTOR_AJUSTE = 0.95  # Factor de negociación IMV
+from models import Base, User, SearchLog, StripeEvent, SubscriptionPlan
+from auth import (
+    verify_password, get_password_hash, create_user_token, 
+    get_current_user, TokenData, Token, create_access_token
+)
 
-app = FastAPI(title="ValuaClick API", version="2.0.0")
+# Logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+# Environment
+DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://user:password@localhost/valuaclick")
+STRIPE_SECRET_KEY = os.getenv("STRIPE_SECRET_KEY")
+STRIPE_WEBHOOK_SECRET = os.getenv("STRIPE_WEBHOOK_SECRET")
+FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:3000")
+
+# Database
+engine = create_engine(DATABASE_URL)
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+Base.metadata.create_all(bind=engine)
+
+# Stripe
+stripe.api_key = STRIPE_SECRET_KEY
+
+# FastAPI app
+app = FastAPI(title="ValuaClick API", version="1.0.0")
+
+# CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_origin_regex=".*",
+    allow_origins=[FRONTEND_URL, "http://localhost:3000", "http://localhost:5173"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-class SearchParams(BaseModel):
-    operacion:  str
-    tipo:       str
-    recamaras:  int = 0
-    ciudad:     str
-    colonia:    Optional[str] = ""
-    precio_min: float
-    precio_max: float
-    superficie: Optional[float] = 0
-    altura:     Optional[float] = 0
-
-def sl(s: str) -> str:
-    import unicodedata, re
-    s = unicodedata.normalize("NFD", s.lower())
-    s = "".join(c for c in s if unicodedata.category(c) != "Mn")
-    return re.sub(r"[^a-z0-9]+", "-", s).strip("-")
-
-T1 = {
-    "casa":"casas","departamento":"departamentos","terreno":"terrenos",
-    "oficina":"oficinas","local":"locales-comerciales","bodega":"bodegas"
-}
-
-async def buscar_apify(params: SearchParams) -> list:
-    """Busca en Inmuebles24 via Apify y retorna comparables reales"""
-    if not APIFY_TOKEN:
-        return []
-
-    zona  = sl(params.colonia) if params.colonia else sl(params.ciudad)
-    tipo  = T1.get(params.tipo, "casas")
-    op    = params.operacion
-    url   = f"https://www.inmuebles24.com/{tipo}-en-{op}-en-{zona}.html"
-
-    # Ejecutar el Actor de Apify
+# Dependency
+def get_db():
+    db = SessionLocal()
     try:
-        async with httpx.AsyncClient(timeout=60) as c:
-            # 1. Iniciar el run
-            run_resp = await c.post(
-                f"https://api.apify.com/v2/acts/{ACTOR_ID}/runs",
-                params={"token": APIFY_TOKEN},
-                json={
-                    "startUrls": [{"url": url}],
-                    "maxItems": 20,
-                    "proxyConfiguration": {
-                        "useApifyProxy": True,
-                        "apifyProxyGroups": ["RESIDENTIAL"],
-                        "apifyProxyCountry": "MX"
-                    }
-                }
-            )
-            if run_resp.status_code not in (200, 201):
-                print(f"[Apify] Error al iniciar run: {run_resp.status_code}")
-                return []
+        yield db
+    finally:
+        db.close()
 
-            run_data = run_resp.json()
-            run_id   = run_data.get("data", {}).get("id")
-            if not run_id:
-                return []
 
-            # 2. Esperar a que termine (máx 50 seg)
-            for _ in range(10):
-                await asyncio.sleep(5)
-                status_resp = await c.get(
-                    f"https://api.apify.com/v2/actor-runs/{run_id}",
-                    params={"token": APIFY_TOKEN}
-                )
-                status = status_resp.json().get("data", {}).get("status", "")
-                if status in ("SUCCEEDED", "FAILED", "ABORTED"):
-                    break
+# ============================================================================
+# SCHEMAS
+# ============================================================================
 
-            if status != "SUCCEEDED":
-                print(f"[Apify] Run terminó con status: {status}")
-                return []
+class SearchRequest(BaseModel):
+    query: str
+    portales: Optional[list] = None  # ['inmuebles24', 'vivanuncios', etc]
 
-            # 3. Obtener resultados
-            dataset_id = status_resp.json().get("data", {}).get("defaultDatasetId")
-            items_resp = await c.get(
-                f"https://api.apify.com/v2/datasets/{dataset_id}/items",
-                params={"token": APIFY_TOKEN, "format": "json"}
-            )
-            items = items_resp.json()
+class SearchResponse(BaseModel):
+    results: list
+    remaining_searches: int
+    blocked: bool
+    message: str = None
 
-    except Exception as e:
-        print(f"[Apify] Error: {e}")
-        return []
+class UserResponse(BaseModel):
+    id: int
+    email: str
+    full_name: Optional[str]
+    subscription_plan: str
+    search_count: int
+    remaining_free_searches: int
+    can_search: bool
 
-    # 4. Normalizar resultados
-    comparables = []
-    for item in items:
-        try:
-            # Extraer precio
-            precio_raw = item.get("price") or item.get("precio") or 0
-            if isinstance(precio_raw, str):
-                precio_raw = "".join(filter(lambda x: x.isdigit(), precio_raw))
-            precio = float(precio_raw) if precio_raw else 0
-            if precio <= 0:
-                continue
-            if not (params.precio_min * 0.5 <= precio <= params.precio_max * 1.5):
-                continue
+class CreateUserRequest(BaseModel):
+    email: EmailStr
+    password: str
+    full_name: str
 
-            # Extraer metros
-            metros = float(item.get("surface") or item.get("size") or
-                          item.get("totalArea") or item.get("metros") or 0)
+class LoginRequest(BaseModel):
+    email: EmailStr
+    password: str
 
-            precio_m2 = round(precio / max(metros, 1)) if metros > 0 else 0
 
-            # Construir URL completa del anuncio
-            raw_url = item.get("url") or item.get("link") or item.get("href") or ""
-            if raw_url.startswith("/"):
-                full_url = "https://www.inmuebles24.com" + raw_url
-            elif raw_url.startswith("http"):
-                full_url = raw_url
-            else:
-                full_url = "#"
+# ============================================================================
+# AUTENTICACIÓN
+# ============================================================================
 
-            comparables.append({
-                "portal":    "Inmuebles24",
-                "titulo":    item.get("title") or item.get("name") or "",
-                "precio":    precio,
-                "metros":    metros,
-                "precio_m2": precio_m2,
-                "recamaras": item.get("rooms") or item.get("bedrooms") or params.recamaras,
-                "antiguedad": 10,
-                "colonia":   params.colonia or params.ciudad,
-                "ciudad":    params.ciudad,
-                "url":       full_url,
-                "score":     0,
-            })
-        except Exception as e:
-            print(f"[Apify] Error normalizando item: {e}")
-            continue
+@app.post("/api/auth/register", response_model=Token)
+async def register(data: CreateUserRequest, db: Session = Depends(get_db)):
+    """Registra nuevo usuario con email/contraseña"""
+    
+    # Verificar si existe
+    existing = db.query(User).filter(User.email == data.email).first()
+    if existing:
+        raise HTTPException(status_code=400, detail="Email ya registrado")
+    
+    # Crear usuario
+    hashed_pwd = get_password_hash(data.password)
+    user = User(
+        email=data.email,
+        full_name=data.full_name,
+        hashed_password=hashed_pwd,
+        oauth_provider="email",
+        subscription_plan=SubscriptionPlan.FREE
+    )
+    
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+    
+    return create_user_token(user.id, user.email)
 
-    return comparables
 
-def calcular_promedio_mercado(comparables: list, params: SearchParams) -> dict:
-    """
-    Metodología comparativa IMV:
-    1. Filtrar outliers (IQR)
-    2. Calcular promedio de precio/m²
-    3. Aplicar factor de ajuste 0.95
-    """
-    if not comparables:
-        return {}
+@app.post("/api/auth/login", response_model=Token)
+async def login(data: LoginRequest, db: Session = Depends(get_db)):
+    """Login con email/contraseña"""
+    
+    user = db.query(User).filter(User.email == data.email).first()
+    if not user or not user.hashed_password:
+        raise HTTPException(status_code=401, detail="Email o contraseña inválidos")
+    
+    if not verify_password(data.password, user.hashed_password):
+        raise HTTPException(status_code=401, detail="Email o contraseña inválidos")
+    
+    return create_user_token(user.id, user.email)
 
-    precios = [r["precio"] for r in comparables if r["precio"] > 0]
-    if len(precios) < 3:
-        return {}
 
-    # Filtrar outliers con IQR
-    q1 = statistics.quantiles(precios, n=4)[0]
-    q3 = statistics.quantiles(precios, n=4)[2]
-    iqr = q3 - q1
-    precios_filtrados = [p for p in precios if q1 - 1.5*iqr <= p <= q3 + 1.5*iqr]
-
-    if not precios_filtrados:
-        precios_filtrados = precios
-
-    promedio_bruto = statistics.mean(precios_filtrados)
-    promedio_ajustado = round(promedio_bruto * FACTOR_AJUSTE)
-
-    return {
-        "promedio_bruto":    round(promedio_bruto),
-        "promedio_ajustado": promedio_ajustado,
-        "factor_ajuste":     FACTOR_AJUSTE,
-        "total_comparables": len(precios_filtrados),
-        "precio_min":        round(min(precios_filtrados)),
-        "precio_max":        round(max(precios_filtrados)),
-    }
-
-def seleccionar_tres(comparables: list, mercado: dict, params: SearchParams) -> dict:
-    """Selecciona 3 opciones estratégicas basadas en datos reales"""
-    if not comparables or not mercado:
-        return {}
-
-    prom = mercado["promedio_ajustado"]
-
-    def score(r):
-        s = 0
-        ratio = r["precio"] / max(prom, 1)
-        s += min(40, max(0, 40*(1-(ratio-0.8)/0.4)))
-        if r.get("metros", 0) > 0: s += 20
-        if r.get("url", "#") != "#": s += 15
-        s += 25  # base
-        return round(s)
-
-    for r in comparables:
-        r["score"] = score(r)
-
-    ordenados = sorted(comparables, key=lambda x: x["precio"], reverse=True)
-
-    # Premium: top 30% de precio
-    umbral_premium = prom * 1.15
-    premium_cands = [r for r in comparables if r["precio"] >= umbral_premium]
-    premium = max(premium_cands, key=lambda x: x["score"]) if premium_cands else ordenados[0]
-
-    # Promedio: más cercano al promedio ajustado
-    promedio = min(comparables, key=lambda x: abs(x["precio"] - prom))
-
-    # Oportunidad: 15-20% por debajo del promedio
-    limite_sup = prom * 0.85
-    limite_inf = prom * 0.70
-    opor_cands = [r for r in comparables if limite_inf <= r["precio"] <= limite_sup]
-    oportunidad = max(opor_cands, key=lambda x: x["score"]) if opor_cands else ordenados[-1]
-
-    return {
-        "premium":     premium,
-        "promedio":    promedio,
-        "oportunidad": oportunidad,
-    }
-
-async def descripcion_ia(r: dict, ctx: str, params: SearchParams, mercado: dict) -> str:
-    """Genera descripción con lenguaje de perito valuador"""
-    if not OPENAI_KEY:
-        diff = round((r["precio"] / max(mercado.get("promedio_ajustado", 1), 1) - 1) * 100)
-        signo = "+" if diff >= 0 else ""
-        return (
-            f"{params.tipo.capitalize()} en {r['colonia']}, {params.ciudad}. "
-            f"Precio {signo}{diff}% respecto al promedio ajustado de mercado "
-            f"(factor negociación {mercado.get('factor_ajuste', 0.95)}). "
-            f"Análisis basado en {mercado.get('total_comparables', 0)} comparables reales de Inmuebles24."
+@app.post("/api/auth/google", response_model=Token)
+async def google_auth(token: str, db: Session = Depends(get_db)):
+    """Login/Registro con Google OAuth"""
+    # En producción, verificar el token de Google
+    # Este es un placeholder - implementar con google-auth-oauthlib
+    
+    from google.auth.transport import requests
+    from google.oauth2 import id_token
+    
+    try:
+        idinfo = id_token.verify_oauth2_token(
+            token, 
+            requests.Request(), 
+            os.getenv("GOOGLE_CLIENT_ID")
         )
-    try:
-        roles = {
-            "premium":    "inmueble de precio elevado con alta plusvalía",
-            "promedio":   "inmueble representativo del valor típico de mercado",
-            "oportunidad":"inmueble por debajo del promedio — oportunidad de inversión"
-        }
-        async with httpx.AsyncClient(timeout=10) as c:
-            resp = await c.post(
-                "https://api.openai.com/v1/chat/completions",
-                headers={"Authorization": f"Bearer {OPENAI_KEY}", "Content-Type": "application/json"},
-                json={"model":"gpt-4o-mini","max_tokens":130,"messages":[
-                    {"role":"system","content":"Perito valuador inmobiliario México (IMV/CIVEVAC). 3 oraciones técnicas en español. Sin bullets ni emojis."},
-                    {"role":"user","content":
-                        f"Tipo: {roles[ctx]}\n"
-                        f"{params.tipo} en {params.operacion} · {r['colonia']}, {params.ciudad}\n"
-                        f"Precio: ${r['precio']:,.0f} MXN | Promedio ajustado zona: ${mercado['promedio_ajustado']:,.0f} MXN\n"
-                        f"Factor ajuste aplicado: {mercado['factor_ajuste']} | Comparables: {mercado['total_comparables']}\n"
-                        f"Superficie: {r['metros']}m² | Precio/m²: ${r['precio_m2']:,}"
-                    }
-                ]}
+        
+        email = idinfo['email']
+        name = idinfo.get('name', '')
+        google_id = idinfo['sub']
+        
+        # Buscar usuario
+        user = db.query(User).filter(User.google_id == google_id).first()
+        
+        if not user:
+            # Crear nuevo usuario
+            user = User(
+                email=email,
+                full_name=name,
+                google_id=google_id,
+                oauth_provider="google",
+                subscription_plan=SubscriptionPlan.FREE
             )
-            return resp.json()["choices"][0]["message"]["content"].strip()
-    except:
-        return f"{params.tipo.capitalize()} en {r['colonia']}, {params.ciudad}. Precio ${r['precio']:,.0f} MXN."
+            db.add(user)
+            db.commit()
+            db.refresh(user)
+        
+        return create_user_token(user.id, user.email)
+    
+    except Exception as e:
+        logger.error(f"Google auth error: {e}")
+        raise HTTPException(status_code=401, detail="Invalid Google token")
 
-@app.post("/buscar")
-async def buscar(params: SearchParams):
-    # 1. Buscar comparables reales en Apify/Inmuebles24
-    comparables = await buscar_apify(params)
 
-    # 2. Calcular promedio de mercado con metodología IMV
-    mercado = calcular_promedio_mercado(comparables, params)
+# ============================================================================
+# USUARIO
+# ============================================================================
 
-    if not mercado or len(comparables) < 3:
-        return {
-            "status": "sin_datos_reales",
-            "mensaje": "No se encontraron suficientes comparables reales. Use el simulador.",
-            "total": len(comparables)
+@app.get("/api/user/me", response_model=UserResponse)
+async def get_me(token_data: TokenData = Depends(get_current_user), db: Session = Depends(get_db)):
+    """Obtiene datos del usuario autenticado"""
+    
+    user = db.query(User).filter(User.id == token_data.user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="Usuario no encontrado")
+    
+    return UserResponse(
+        id=user.id,
+        email=user.email,
+        full_name=user.full_name,
+        subscription_plan=user.subscription_plan,
+        search_count=user.search_count,
+        remaining_free_searches=int(user.remaining_free_searches()),
+        can_search=user.can_search()
+    )
+
+
+# ============================================================================
+# BÚSQUEDAS
+# ============================================================================
+
+@app.post("/api/search", response_model=SearchResponse)
+async def search(
+    req: SearchRequest,
+    token_data: Optional[TokenData] = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Ejecuta búsqueda con limitación según plan"""
+    
+    user = None
+    if token_data:
+        user = db.query(User).filter(User.id == token_data.user_id).first()
+    
+    # Verificar si puede buscar
+    if user:
+        if not user.can_search():
+            return SearchResponse(
+                results=[],
+                remaining_searches=0,
+                blocked=True,
+                message="Límite de búsquedas alcanzado. Suscríbete para acceso ilimitado.",
+                upgrade_url="/pricing"
+            )
+    else:
+        # Usuario anónimo - máximo 2 búsquedas por sesión
+        return SearchResponse(
+            results=[],
+            remaining_searches=0,
+            blocked=True,
+            message="Crea una cuenta para buscar. Obtén 2 búsquedas gratuitas."
+        )
+    
+    # Ejecutar búsqueda (aquí iría tu lógica de Apify + scraping)
+    try:
+        results = await execute_search(req.query, req.portales or [])
+    except Exception as e:
+        logger.error(f"Search error: {e}")
+        results = []
+    
+    # Registrar búsqueda
+    search_log = SearchLog(
+        user_id=user.id if user else None,
+        query=req.query,
+        portales_searched=json.dumps(req.portales or []),
+        result_count=len(results)
+    )
+    db.add(search_log)
+    
+    # Incrementar contador
+    user.search_count += 1
+    user.last_search_date = datetime.utcnow()
+    db.commit()
+    
+    return SearchResponse(
+        results=results,
+        remaining_searches=int(max(0, 2 - user.search_count)) if user.subscription_plan == SubscriptionPlan.FREE else 999,
+        blocked=False,
+        message="Búsqueda exitosa"
+    )
+
+
+async def execute_search(query: str, portales: list):
+    """Ejecuta búsqueda real (conectar con Apify)"""
+    # PLACEHOLDER: implementar lógica de scraping
+    # Por ahora retorna resultados mock
+    return [
+        {
+            "id": 1,
+            "title": f"Resultado para: {query}",
+            "price": "$500,000",
+            "location": "Boca del Río, Veracruz",
+            "portal": "inmuebles24"
         }
+    ]
 
-    # 3. Seleccionar 3 opciones estratégicas
-    tres = seleccionar_tres(comparables, mercado, params)
-    if not tres:
-        return {"status": "sin_resultados", "total": 0}
 
-    # 4. Generar descripciones IA en paralelo
-    ctxs = ["premium", "promedio", "oportunidad"]
-    descs = await asyncio.gather(*[
-        descripcion_ia(tres[ctx], ctx, params, mercado)
-        for ctx in ctxs if ctx in tres
-    ], return_exceptions=True)
+# ============================================================================
+# SUSCRIPCIÓN / STRIPE
+# ============================================================================
 
-    for i, ctx in enumerate(ctxs):
-        if ctx in tres and i < len(descs) and isinstance(descs[i], str):
-            tres[ctx]["descripcion_ia"] = descs[i]
+class CheckoutSessionRequest(BaseModel):
+    plan: str  # 'agente', 'despacho', 'institucional'
 
-    return {
-        "status":            "ok",
-        "total":             mercado["total_comparables"],
-        "precio_promedio":   mercado["promedio_ajustado"],
-        "precio_bruto":      mercado["promedio_bruto"],
-        "factor_ajuste":     mercado["factor_ajuste"],
-        "premium":           tres.get("premium"),
-        "promedio":          tres.get("promedio"),
-        "oportunidad":       tres.get("oportunidad"),
+@app.post("/api/subscription/checkout")
+async def create_checkout_session(
+    req: CheckoutSessionRequest,
+    token_data: TokenData = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Crea sesión de checkout en Stripe"""
+    
+    user = db.query(User).filter(User.id == token_data.user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="Usuario no encontrado")
+    
+    # Precios de planes (debes configurar en Stripe Dashboard)
+    plans = {
+        "agente": "price_agente_valuaclick",
+        "despacho": "price_despacho_valuaclick",
+        "institucional": "price_institucional_valuaclick"
     }
+    
+    if req.plan not in plans:
+        raise HTTPException(status_code=400, detail="Plan inválido")
+    
+    try:
+        # Crear sesión de checkout
+        session = stripe.checkout.Session.create(
+            customer_email=user.email,
+            payment_method_types=["card"],
+            line_items=[{
+                "price": plans[req.plan],
+                "quantity": 1,
+            }],
+            mode="subscription",
+            success_url=f"{FRONTEND_URL}/success?session_id={{CHECKOUT_SESSION_ID}}",
+            cancel_url=f"{FRONTEND_URL}/pricing",
+            metadata={
+                "user_id": str(user.id),
+                "plan": req.plan
+            }
+        )
+        
+        return {"checkout_url": session.url, "session_id": session.id}
+    
+    except Exception as e:
+        logger.error(f"Stripe error: {e}")
+        raise HTTPException(status_code=500, detail="Error creando sesión de pago")
+
+
+@app.post("/api/webhook/stripe")
+async def stripe_webhook(
+    request: Request,
+    stripe_signature: str = Header(None),
+    db: Session = Depends(get_db)
+):
+    """Webhook para eventos de Stripe"""
+    
+    if not stripe_signature:
+        raise HTTPException(status_code=400, detail="No signature")
+    
+    try:
+        event = stripe.Webhook.construct_event(
+            await request.body(),
+            stripe_signature,
+            STRIPE_WEBHOOK_SECRET
+        )
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid payload")
+    except stripe.error.SignatureVerificationError:
+        raise HTTPException(status_code=400, detail="Invalid signature")
+    
+    # Procesar evento
+    if event["type"] == "checkout.session.completed":
+        session = event["data"]["object"]
+        user_id = int(session["metadata"]["user_id"])
+        plan = session["metadata"]["plan"]
+        
+        user = db.query(User).filter(User.id == user_id).first()
+        if user:
+            user.subscription_plan = plan
+            user.subscription_id = session["subscription"]
+            
+            # Establecer fecha de expiración (30 días)
+            user.subscription_expires = datetime.utcnow() + timedelta(days=30)
+            user.search_count = 0  # Reset contador
+            
+            db.commit()
+            logger.info(f"User {user_id} upgraded to {plan}")
+    
+    elif event["type"] == "customer.subscription.deleted":
+        subscription = event["data"]["object"]
+        user = db.query(User).filter(User.subscription_id == subscription["id"]).first()
+        if user:
+            user.subscription_plan = SubscriptionPlan.FREE
+            user.subscription_expires = None
+            user.search_count = 0
+            db.commit()
+            logger.info(f"User {user.id} subscription cancelled")
+    
+    # Guardar evento
+    stripe_event = StripeEvent(
+        event_id=event["id"],
+        event_type=event["type"],
+        data=json.dumps(event["data"]),
+        processed=True
+    )
+    db.add(stripe_event)
+    db.commit()
+    
+    return {"status": "success"}
+
+
+@app.get("/api/subscription/status")
+async def get_subscription_status(
+    token_data: TokenData = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Obtiene estado de suscripción"""
+    
+    user = db.query(User).filter(User.id == token_data.user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="Usuario no encontrado")
+    
+    return {
+        "plan": user.subscription_plan,
+        "is_active": user.is_subscription_active(),
+        "expires_at": user.subscription_expires,
+        "search_count": user.search_count,
+        "remaining_searches": int(user.remaining_free_searches())
+    }
+
+
+# ============================================================================
+# HEALTH & INFO
+# ============================================================================
 
 @app.get("/health")
-def health():
+async def health():
+    return {"status": "ok", "version": "1.0.0"}
+
+
+@app.get("/api/pricing")
+async def pricing():
+    """Obtiene planes y precios"""
     return {
-        "status":   "ValuaClick API activa",
-        "version":  "2.0.0",
-        "portal":   "valuaclick.mx",
-        "empresa":  "JABES Avalúos y Proyectos SC",
-        "apify":    "conectado" if APIFY_TOKEN else "sin token",
-        "openai":   "conectado" if OPENAI_KEY else "sin token",
+        "plans": [
+            {
+                "id": "agente",
+                "name": "Plan Agente",
+                "price": 150,
+                "currency": "MXN",
+                "period": "monthly",
+                "features": [
+                    "Búsquedas ilimitadas",
+                    "Acceso a todos los portales",
+                    "Análisis básico",
+                    "Soporte por email"
+                ]
+            },
+            {
+                "id": "despacho",
+                "name": "Plan Despacho",
+                "price": 300,
+                "currency": "MXN",
+                "period": "monthly",
+                "features": [
+                    "Búsquedas ilimitadas",
+                    "Acceso a todos los portales",
+                    "Análisis avanzado",
+                    "Reportes PDF",
+                    "Soporte prioritario"
+                ]
+            },
+            {
+                "id": "institucional",
+                "name": "Plan Institucional",
+                "price": 1000,
+                "currency": "MXN",
+                "period": "monthly",
+                "features": [
+                    "Búsquedas ilimitadas",
+                    "Acceso a todos los portales",
+                    "Análisis enterprise",
+                    "API custom",
+                    "Soporte 24/7"
+                ]
+            }
+        ]
     }
+
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8000)
