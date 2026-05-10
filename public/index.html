@@ -1,0 +1,958 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ValuaClick — Comparador Inmobiliario</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg: #f6f3ee;
+      --surface: #ffffff;
+      --surface-alt: #ede9e1;
+      --text: #1a1714;
+      --text-muted: #6b6560;
+      --accent: #c45d35;
+      --accent-hover: #a84d2c;
+      --accent-light: #fdf0eb;
+      --border: #ddd7ce;
+      --success: #3a7d53;
+      --serif: 'DM Serif Display', serif;
+      --sans: 'Outfit', sans-serif;
+      --radius: 12px;
+      --shadow: 0 2px 20px rgba(26,23,20,.06);
+      --shadow-lg: 0 8px 40px rgba(26,23,20,.1);
+    }
+
+    html { scroll-behavior: smooth; }
+
+    body {
+      font-family: var(--sans);
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.6;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    /* ---- NAV ---- */
+    .nav {
+      position: sticky;
+      top: 0;
+      z-index: 100;
+      background: rgba(246,243,238,.85);
+      backdrop-filter: blur(16px);
+      border-bottom: 1px solid var(--border);
+      padding: 0 1.5rem;
+    }
+    .nav-inner {
+      max-width: 1200px;
+      margin: 0 auto;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      height: 64px;
+    }
+    .logo {
+      font-family: var(--serif);
+      font-size: 1.5rem;
+      color: var(--text);
+      text-decoration: none;
+      letter-spacing: -0.02em;
+    }
+    .logo span { color: var(--accent); }
+    .nav-links { display: flex; align-items: center; gap: 1.5rem; }
+    .nav-links a {
+      font-size: .875rem;
+      font-weight: 500;
+      color: var(--text-muted);
+      text-decoration: none;
+      transition: color .2s;
+    }
+    .nav-links a:hover { color: var(--text); }
+    .nav-user { display: none; align-items: center; gap: .75rem; font-size: .875rem; }
+    .nav-user .user-email { color: var(--text-muted); }
+
+    /* ---- BUTTONS ---- */
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: .5rem;
+      padding: .625rem 1.25rem;
+      font-family: var(--sans);
+      font-size: .875rem;
+      font-weight: 600;
+      border-radius: 8px;
+      cursor: pointer;
+      border: none;
+      transition: all .2s;
+      text-decoration: none;
+    }
+    .btn-primary { background: var(--accent); color: #fff; }
+    .btn-primary:hover { background: var(--accent-hover); transform: translateY(-1px); box-shadow: var(--shadow); }
+    .btn-outline { background: transparent; border: 1.5px solid var(--border); color: var(--text); }
+    .btn-outline:hover { border-color: var(--accent); color: var(--accent); }
+    .btn-ghost { background: transparent; color: var(--text-muted); }
+    .btn-ghost:hover { color: var(--accent); }
+    .btn-sm { padding: .375rem .875rem; font-size: .8125rem; }
+    .btn:disabled { opacity: .5; cursor: not-allowed; }
+
+    /* ---- HERO ---- */
+    .hero {
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 5rem 1.5rem 3rem;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 4rem;
+      align-items: center;
+    }
+    .hero-text h1 {
+      font-family: var(--serif);
+      font-size: 3.25rem;
+      line-height: 1.1;
+      letter-spacing: -0.03em;
+      margin-bottom: 1.25rem;
+    }
+    .hero-text h1 em {
+      font-style: normal;
+      color: var(--accent);
+    }
+    .hero-text p {
+      font-size: 1.125rem;
+      color: var(--text-muted);
+      max-width: 440px;
+      margin-bottom: 2rem;
+    }
+    .hero-stats {
+      display: flex;
+      gap: 2.5rem;
+      margin-top: 2.5rem;
+      padding-top: 2rem;
+      border-top: 1px solid var(--border);
+    }
+    .hero-stats .stat-value {
+      font-family: var(--serif);
+      font-size: 2rem;
+      color: var(--accent);
+    }
+    .hero-stats .stat-label {
+      font-size: .8125rem;
+      color: var(--text-muted);
+      margin-top: .125rem;
+    }
+    .hero-visual {
+      position: relative;
+      background: var(--surface);
+      border-radius: 20px;
+      padding: 2rem;
+      box-shadow: var(--shadow-lg);
+      border: 1px solid var(--border);
+    }
+    .hero-visual::before {
+      content: '';
+      position: absolute;
+      top: -20px;
+      right: -20px;
+      width: 120px;
+      height: 120px;
+      background: var(--accent-light);
+      border-radius: 50%;
+      z-index: -1;
+    }
+    .hero-visual .card-label {
+      font-size: .75rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: .1em;
+      color: var(--text-muted);
+      margin-bottom: 1rem;
+    }
+    .preview-rows { display: flex; flex-direction: column; gap: .75rem; }
+    .preview-row {
+      display: flex; align-items: center; gap: 1rem;
+      padding: .875rem 1rem;
+      background: var(--bg);
+      border-radius: 10px;
+      transition: transform .2s;
+    }
+    .preview-row:hover { transform: translateX(4px); }
+    .preview-dot {
+      width: 36px; height: 36px;
+      border-radius: 8px;
+      flex-shrink: 0;
+    }
+    .preview-dot.d1 { background: #e8ddd4; }
+    .preview-dot.d2 { background: #d4dde8; }
+    .preview-dot.d3 { background: #d4e8d6; }
+    .preview-info { flex: 1; }
+    .preview-title { font-size: .875rem; font-weight: 600; }
+    .preview-sub { font-size: .75rem; color: var(--text-muted); }
+    .preview-price { font-family: var(--serif); font-size: 1rem; color: var(--accent); }
+
+    /* ---- SEARCH SECTION ---- */
+    .search-section {
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 3rem 1.5rem;
+    }
+    .search-section h2 {
+      font-family: var(--serif);
+      font-size: 2rem;
+      text-align: center;
+      margin-bottom: .5rem;
+    }
+    .search-section .subtitle {
+      text-align: center;
+      color: var(--text-muted);
+      margin-bottom: 2rem;
+    }
+    .search-box {
+      max-width: 680px;
+      margin: 0 auto 2rem;
+      display: flex;
+      gap: .75rem;
+    }
+    .search-box input {
+      flex: 1;
+      padding: .875rem 1.25rem;
+      font-family: var(--sans);
+      font-size: 1rem;
+      border: 1.5px solid var(--border);
+      border-radius: 10px;
+      background: var(--surface);
+      outline: none;
+      transition: border-color .2s;
+    }
+    .search-box input:focus { border-color: var(--accent); }
+    .search-box input::placeholder { color: #b5afa8; }
+
+    .portals-filter {
+      max-width: 680px;
+      margin: 0 auto 2rem;
+      display: flex;
+      flex-wrap: wrap;
+      gap: .5rem;
+      justify-content: center;
+    }
+    .portal-tag {
+      padding: .375rem .875rem;
+      font-size: .8125rem;
+      font-weight: 500;
+      border: 1.5px solid var(--border);
+      border-radius: 20px;
+      background: var(--surface);
+      cursor: pointer;
+      transition: all .2s;
+      color: var(--text-muted);
+      font-family: var(--sans);
+    }
+    .portal-tag.active { border-color: var(--accent); color: var(--accent); background: var(--accent-light); }
+    .portal-tag:hover { border-color: var(--accent); }
+
+    /* ---- RESULTS ---- */
+    .results-area {
+      max-width: 800px;
+      margin: 0 auto;
+    }
+    .results-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 1rem;
+    }
+    .results-count { font-size: .875rem; color: var(--text-muted); }
+    .remaining-badge {
+      font-size: .8125rem;
+      font-weight: 600;
+      padding: .25rem .75rem;
+      border-radius: 20px;
+      background: var(--accent-light);
+      color: var(--accent);
+    }
+
+    .result-card {
+      background: var(--surface);
+      border-radius: var(--radius);
+      border: 1px solid var(--border);
+      padding: 1.5rem;
+      margin-bottom: 1rem;
+      transition: all .25s;
+      display: grid;
+      grid-template-columns: auto 1fr auto;
+      gap: 1.25rem;
+      align-items: start;
+    }
+    .result-card:hover { box-shadow: var(--shadow); transform: translateY(-2px); }
+    .result-thumb {
+      width: 80px; height: 64px;
+      background: var(--surface-alt);
+      border-radius: 8px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 1.5rem;
+    }
+    .result-body h3 { font-size: 1rem; font-weight: 600; margin-bottom: .25rem; }
+    .result-body .result-location { font-size: .8125rem; color: var(--text-muted); }
+    .result-body .result-portal {
+      display: inline-block;
+      margin-top: .375rem;
+      font-size: .75rem;
+      font-weight: 600;
+      padding: .125rem .5rem;
+      border-radius: 4px;
+      background: var(--surface-alt);
+      color: var(--text-muted);
+    }
+    .result-price {
+      font-family: var(--serif);
+      font-size: 1.25rem;
+      color: var(--accent);
+      white-space: nowrap;
+    }
+
+    .empty-state {
+      text-align: center;
+      padding: 4rem 2rem;
+      color: var(--text-muted);
+    }
+    .empty-state svg { width: 64px; height: 64px; margin-bottom: 1rem; opacity: .3; }
+    .empty-state h3 { font-family: var(--serif); font-size: 1.25rem; color: var(--text); margin-bottom: .5rem; }
+
+    /* ---- PRICING ---- */
+    .pricing-section {
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 5rem 1.5rem;
+    }
+    .pricing-section h2 {
+      font-family: var(--serif);
+      font-size: 2.5rem;
+      text-align: center;
+      margin-bottom: .5rem;
+    }
+    .pricing-section .subtitle {
+      text-align: center;
+      color: var(--text-muted);
+      margin-bottom: 3rem;
+    }
+    .pricing-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 1.5rem;
+    }
+    .plan-card {
+      background: var(--surface);
+      border-radius: 16px;
+      border: 1.5px solid var(--border);
+      padding: 2rem;
+      position: relative;
+      transition: all .3s;
+    }
+    .plan-card:hover { box-shadow: var(--shadow-lg); transform: translateY(-4px); }
+    .plan-card.featured { border-color: var(--accent); }
+    .plan-card.featured::before {
+      content: 'Popular';
+      position: absolute;
+      top: -10px; left: 50%;
+      transform: translateX(-50%);
+      background: var(--accent);
+      color: #fff;
+      font-size: .75rem;
+      font-weight: 700;
+      padding: .25rem .875rem;
+      border-radius: 20px;
+    }
+    .plan-name { font-size: .875rem; font-weight: 600; text-transform: uppercase; letter-spacing: .08em; color: var(--text-muted); margin-bottom: .75rem; }
+    .plan-price {
+      font-family: var(--serif);
+      font-size: 2.5rem;
+      margin-bottom: .25rem;
+    }
+    .plan-price span { font-family: var(--sans); font-size: .875rem; font-weight: 400; color: var(--text-muted); }
+    .plan-features {
+      list-style: none;
+      margin: 1.5rem 0;
+      display: flex;
+      flex-direction: column;
+      gap: .625rem;
+    }
+    .plan-features li {
+      font-size: .875rem;
+      color: var(--text-muted);
+      padding-left: 1.5rem;
+      position: relative;
+    }
+    .plan-features li::before {
+      content: '';
+      position: absolute;
+      left: 0;
+      top: .375rem;
+      width: 10px;
+      height: 6px;
+      border-left: 2px solid var(--success);
+      border-bottom: 2px solid var(--success);
+      transform: rotate(-45deg);
+    }
+
+    /* ---- AUTH MODALS ---- */
+    .modal-overlay {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(26,23,20,.5);
+      backdrop-filter: blur(4px);
+      z-index: 200;
+      align-items: center;
+      justify-content: center;
+    }
+    .modal-overlay.active { display: flex; }
+    .modal {
+      background: var(--surface);
+      border-radius: 20px;
+      padding: 2.5rem;
+      width: 100%;
+      max-width: 420px;
+      box-shadow: var(--shadow-lg);
+      position: relative;
+      animation: modalIn .3s ease-out;
+    }
+    @keyframes modalIn {
+      from { opacity: 0; transform: translateY(20px) scale(.97); }
+      to { opacity: 1; transform: translateY(0) scale(1); }
+    }
+    .modal-close {
+      position: absolute;
+      top: 1rem; right: 1rem;
+      background: none; border: none;
+      font-size: 1.25rem;
+      cursor: pointer;
+      color: var(--text-muted);
+      width: 32px; height: 32px;
+      display: flex; align-items: center; justify-content: center;
+      border-radius: 8px;
+      transition: background .2s;
+    }
+    .modal-close:hover { background: var(--bg); }
+    .modal h2 {
+      font-family: var(--serif);
+      font-size: 1.5rem;
+      margin-bottom: .5rem;
+    }
+    .modal p { color: var(--text-muted); font-size: .875rem; margin-bottom: 1.5rem; }
+    .form-group { margin-bottom: 1rem; }
+    .form-group label {
+      display: block;
+      font-size: .8125rem;
+      font-weight: 600;
+      margin-bottom: .375rem;
+      color: var(--text-muted);
+    }
+    .form-group input {
+      width: 100%;
+      padding: .75rem 1rem;
+      border: 1.5px solid var(--border);
+      border-radius: 8px;
+      font-family: var(--sans);
+      font-size: .9375rem;
+      outline: none;
+      transition: border-color .2s;
+      background: var(--surface);
+    }
+    .form-group input:focus { border-color: var(--accent); }
+    .form-error { color: var(--accent); font-size: .8125rem; margin-top: .25rem; display: none; }
+    .modal-footer {
+      margin-top: 1.5rem;
+      text-align: center;
+      font-size: .8125rem;
+      color: var(--text-muted);
+    }
+    .modal-footer a { color: var(--accent); text-decoration: none; font-weight: 600; cursor: pointer; }
+
+    /* ---- ALERT BANNER ---- */
+    .alert {
+      display: none;
+      padding: .75rem 1.5rem;
+      border-radius: 10px;
+      font-size: .875rem;
+      font-weight: 500;
+      margin-bottom: 1rem;
+      max-width: 680px;
+      margin-left: auto;
+      margin-right: auto;
+    }
+    .alert.show { display: block; }
+    .alert-success { background: #ecf5ef; color: var(--success); }
+    .alert-error { background: var(--accent-light); color: var(--accent); }
+
+    /* ---- FOOTER ---- */
+    .footer {
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 3rem 1.5rem;
+      border-top: 1px solid var(--border);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: .8125rem;
+      color: var(--text-muted);
+    }
+
+    /* ---- RESPONSIVE ---- */
+    @media (max-width: 768px) {
+      .hero { grid-template-columns: 1fr; gap: 2rem; padding-top: 3rem; }
+      .hero-text h1 { font-size: 2.25rem; }
+      .hero-visual { display: none; }
+      .pricing-grid { grid-template-columns: 1fr; max-width: 400px; margin: 0 auto; }
+      .result-card { grid-template-columns: 1fr; }
+      .result-thumb { display: none; }
+      .hero-stats { gap: 1.5rem; }
+      .nav-links .desktop-only { display: none; }
+    }
+
+    /* ---- SKELETON LOADING ---- */
+    .skeleton {
+      background: linear-gradient(90deg, var(--surface-alt) 25%, var(--bg) 50%, var(--surface-alt) 75%);
+      background-size: 200% 100%;
+      animation: shimmer 1.5s infinite;
+      border-radius: 8px;
+    }
+    @keyframes shimmer {
+      0% { background-position: 200% 0; }
+      100% { background-position: -200% 0; }
+    }
+    .skeleton-card {
+      height: 96px;
+      margin-bottom: 1rem;
+      border-radius: var(--radius);
+    }
+
+    /* ---- FADE IN ---- */
+    .fade-in {
+      opacity: 0;
+      transform: translateY(12px);
+      animation: fadeUp .5s ease-out forwards;
+    }
+    @keyframes fadeUp {
+      to { opacity: 1; transform: translateY(0); }
+    }
+    .fade-in:nth-child(1) { animation-delay: 0s; }
+    .fade-in:nth-child(2) { animation-delay: .08s; }
+    .fade-in:nth-child(3) { animation-delay: .16s; }
+    .fade-in:nth-child(4) { animation-delay: .24s; }
+    .fade-in:nth-child(5) { animation-delay: .32s; }
+  </style>
+</head>
+<body>
+  <!-- Nav -->
+  <nav class="nav">
+    <div class="nav-inner">
+      <a href="#" class="logo">Valua<span>Click</span></a>
+      <div class="nav-links">
+        <a href="#search" class="desktop-only">Buscar</a>
+        <a href="#pricing" class="desktop-only">Planes</a>
+        <div id="authButtons">
+          <a href="#" class="btn btn-ghost btn-sm" onclick="openModal('login')">Iniciar sesión</a>
+          <a href="#" class="btn btn-primary btn-sm" onclick="openModal('register')">Registrarse</a>
+        </div>
+        <div id="userNav" class="nav-user">
+          <span class="user-email" id="userEmail"></span>
+          <a href="#" class="btn btn-ghost btn-sm" onclick="logout()">Salir</a>
+        </div>
+      </div>
+    </div>
+  </nav>
+
+  <!-- Hero -->
+  <section class="hero">
+    <div class="hero-text fade-in">
+      <h1>Compara inmuebles de <em>todos los portales</em> en un solo lugar</h1>
+      <p>ValuaClick reúne las publicaciones de Inmuebles24, Vivanuncios, Segundamano y más. Busca, compara precios y toma mejores decisiones.</p>
+      <a href="#search" class="btn btn-primary">Comenzar a buscar</a>
+      <div class="hero-stats">
+        <div>
+          <div class="stat-value">6</div>
+          <div class="stat-label">Portales conectados</div>
+        </div>
+        <div>
+          <div class="stat-value">12k+</div>
+          <div class="stat-label">Propiedades indexadas</div>
+        </div>
+        <div>
+          <div class="stat-value">$150</div>
+          <div class="stat-label">MXN / mes</div>
+        </div>
+      </div>
+    </div>
+    <div class="hero-visual fade-in">
+      <div class="card-label">Vista previa de resultados</div>
+      <div class="preview-rows">
+        <div class="preview-row">
+          <div class="preview-dot d1"></div>
+          <div class="preview-info">
+            <div class="preview-title">Casa en Boca del Río</div>
+            <div class="preview-sub">Inmuebles24 · 3 rec · 180m²</div>
+          </div>
+          <div class="preview-price">$2.4M</div>
+        </div>
+        <div class="preview-row">
+          <div class="preview-dot d2"></div>
+          <div class="preview-info">
+            <div class="preview-title">Depa en Polanco</div>
+            <div class="preview-sub">Vivanuncios · 2 rec · 95m²</div>
+          </div>
+          <div class="preview-price">$4.8M</div>
+        </div>
+        <div class="preview-row">
+          <div class="preview-dot d3"></div>
+          <div class="preview-info">
+            <div class="preview-title">Terreno en Mérida</div>
+            <div class="preview-sub">Segundamano · 500m²</div>
+          </div>
+          <div class="preview-price">$890K</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Search -->
+  <section class="search-section" id="search">
+    <h2>Buscar propiedades</h2>
+    <p class="subtitle">Escribe lo que buscas y selecciona los portales</p>
+
+    <div id="searchAlert" class="alert"></div>
+
+    <div class="search-box">
+      <input type="text" id="searchInput" placeholder="Ej: Casa 3 recámaras en Veracruz..." />
+      <button class="btn btn-primary" id="searchBtn" onclick="doSearch()">Buscar</button>
+    </div>
+
+    <div class="portals-filter" id="portalsFilter">
+      <button class="portal-tag active" data-portal="inmuebles24">Inmuebles24</button>
+      <button class="portal-tag" data-portal="vivanuncios">Vivanuncios</button>
+      <button class="portal-tag" data-portal="segundamano">Segundamano</button>
+      <button class="portal-tag" data-portal="propiedades">Propiedades.com</button>
+      <button class="portal-tag" data-portal="metroscubicos">Metros Cúbicos</button>
+      <button class="portal-tag" data-portal="lamudi">Lamudi</button>
+    </div>
+
+    <div class="results-area" id="resultsArea">
+      <div class="empty-state">
+        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z" />
+        </svg>
+        <h3>Realiza tu primera búsqueda</h3>
+        <p>Los resultados aparecerán aquí</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- Pricing -->
+  <section class="pricing-section" id="pricing">
+    <h2>Planes y precios</h2>
+    <p class="subtitle">Desbloquea búsquedas ilimitadas y análisis avanzado</p>
+    <div class="pricing-grid" id="pricingGrid"></div>
+  </section>
+
+  <!-- Footer -->
+  <footer class="footer">
+    <span>ValuaClick &copy; 2024 — Comparador inmobiliario</span>
+    <span>Hecho en México</span>
+  </footer>
+
+  <!-- Login Modal -->
+  <div class="modal-overlay" id="loginModal">
+    <div class="modal">
+      <button class="modal-close" onclick="closeModals()">&times;</button>
+      <h2>Bienvenido de vuelta</h2>
+      <p>Inicia sesión para acceder a tus búsquedas</p>
+      <form onsubmit="return handleLogin(event)">
+        <div class="form-group">
+          <label>Email</label>
+          <input type="email" id="loginEmail" required placeholder="tu@correo.com" />
+        </div>
+        <div class="form-group">
+          <label>Contraseña</label>
+          <input type="password" id="loginPassword" required placeholder="Tu contraseña" />
+        </div>
+        <div class="form-error" id="loginError"></div>
+        <button type="submit" class="btn btn-primary" style="width:100%; margin-top:.5rem;" id="loginSubmit">Iniciar sesión</button>
+      </form>
+      <div class="modal-footer">
+        ¿No tienes cuenta? <a onclick="switchModal('register')">Regístrate</a>
+      </div>
+    </div>
+  </div>
+
+  <!-- Register Modal -->
+  <div class="modal-overlay" id="registerModal">
+    <div class="modal">
+      <button class="modal-close" onclick="closeModals()">&times;</button>
+      <h2>Crear cuenta</h2>
+      <p>Obtén 2 búsquedas gratuitas al registrarte</p>
+      <form onsubmit="return handleRegister(event)">
+        <div class="form-group">
+          <label>Nombre completo</label>
+          <input type="text" id="regName" required placeholder="Tu nombre" />
+        </div>
+        <div class="form-group">
+          <label>Email</label>
+          <input type="email" id="regEmail" required placeholder="tu@correo.com" />
+        </div>
+        <div class="form-group">
+          <label>Contraseña</label>
+          <input type="password" id="regPassword" required minlength="6" placeholder="Mínimo 6 caracteres" />
+        </div>
+        <div class="form-error" id="regError"></div>
+        <button type="submit" class="btn btn-primary" style="width:100%; margin-top:.5rem;" id="regSubmit">Crear cuenta</button>
+      </form>
+      <div class="modal-footer">
+        ¿Ya tienes cuenta? <a onclick="switchModal('login')">Inicia sesión</a>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const API = '/api';
+    let token = localStorage.getItem('vc_token');
+    let userInfo = null;
+
+    function openModal(type) {
+      closeModals();
+      document.getElementById(type + 'Modal').classList.add('active');
+    }
+    function closeModals() {
+      document.querySelectorAll('.modal-overlay').forEach(m => m.classList.remove('active'));
+    }
+    function switchModal(type) {
+      closeModals();
+      setTimeout(() => openModal(type), 100);
+    }
+
+    document.querySelectorAll('.modal-overlay').forEach(overlay => {
+      overlay.addEventListener('click', (e) => {
+        if (e.target === overlay) closeModals();
+      });
+    });
+
+    function showAlert(msg, type = 'error') {
+      const el = document.getElementById('searchAlert');
+      el.textContent = msg;
+      el.className = 'alert show alert-' + type;
+      setTimeout(() => el.classList.remove('show'), 5000);
+    }
+
+    function showFormError(id, msg) {
+      const el = document.getElementById(id);
+      el.textContent = msg;
+      el.style.display = 'block';
+      setTimeout(() => el.style.display = 'none', 4000);
+    }
+
+    async function apiFetch(path, opts = {}) {
+      const headers = { 'Content-Type': 'application/json', ...opts.headers };
+      if (token) headers['Authorization'] = 'Bearer ' + token;
+      const res = await fetch(API + path, { ...opts, headers });
+      const data = await res.json();
+      if (!res.ok) throw { status: res.status, detail: data.detail || 'Error' };
+      return data;
+    }
+
+    async function handleLogin(e) {
+      e.preventDefault();
+      const btn = document.getElementById('loginSubmit');
+      btn.disabled = true;
+      btn.textContent = 'Ingresando...';
+      try {
+        const data = await apiFetch('/auth/login', {
+          method: 'POST',
+          body: JSON.stringify({
+            email: document.getElementById('loginEmail').value,
+            password: document.getElementById('loginPassword').value,
+          }),
+        });
+        token = data.access_token;
+        localStorage.setItem('vc_token', token);
+        closeModals();
+        await loadUser();
+      } catch (err) {
+        showFormError('loginError', err.detail || 'Error al iniciar sesión');
+      } finally {
+        btn.disabled = false;
+        btn.textContent = 'Iniciar sesión';
+      }
+      return false;
+    }
+
+    async function handleRegister(e) {
+      e.preventDefault();
+      const btn = document.getElementById('regSubmit');
+      btn.disabled = true;
+      btn.textContent = 'Creando cuenta...';
+      try {
+        const data = await apiFetch('/auth/register', {
+          method: 'POST',
+          body: JSON.stringify({
+            email: document.getElementById('regEmail').value,
+            password: document.getElementById('regPassword').value,
+            full_name: document.getElementById('regName').value,
+          }),
+        });
+        token = data.access_token;
+        localStorage.setItem('vc_token', token);
+        closeModals();
+        await loadUser();
+        showAlert('Cuenta creada. Tienes 2 búsquedas gratuitas.', 'success');
+      } catch (err) {
+        showFormError('regError', err.detail || 'Error al registrarse');
+      } finally {
+        btn.disabled = false;
+        btn.textContent = 'Crear cuenta';
+      }
+      return false;
+    }
+
+    function logout() {
+      token = null;
+      userInfo = null;
+      localStorage.removeItem('vc_token');
+      updateUI();
+    }
+
+    async function loadUser() {
+      if (!token) { updateUI(); return; }
+      try {
+        userInfo = await apiFetch('/user/me');
+        updateUI();
+      } catch {
+        token = null;
+        localStorage.removeItem('vc_token');
+        updateUI();
+      }
+    }
+
+    function updateUI() {
+      const authBtns = document.getElementById('authButtons');
+      const userNav = document.getElementById('userNav');
+      if (token && userInfo) {
+        authBtns.style.display = 'none';
+        userNav.style.display = 'flex';
+        document.getElementById('userEmail').textContent = userInfo.email;
+      } else {
+        authBtns.style.display = 'flex';
+        userNav.style.display = 'none';
+      }
+    }
+
+    // Portal tag toggling
+    document.querySelectorAll('.portal-tag').forEach(tag => {
+      tag.addEventListener('click', () => tag.classList.toggle('active'));
+    });
+
+    function getActivePortals() {
+      return [...document.querySelectorAll('.portal-tag.active')].map(t => t.dataset.portal);
+    }
+
+    async function doSearch() {
+      const query = document.getElementById('searchInput').value.trim();
+      if (!query) return;
+      if (!token) { openModal('login'); return; }
+
+      const btn = document.getElementById('searchBtn');
+      btn.disabled = true;
+      btn.textContent = 'Buscando...';
+      const area = document.getElementById('resultsArea');
+      area.innerHTML = '<div class="skeleton skeleton-card"></div><div class="skeleton skeleton-card"></div><div class="skeleton skeleton-card"></div>';
+
+      try {
+        const data = await apiFetch('/search', {
+          method: 'POST',
+          body: JSON.stringify({ query, portales: getActivePortals() }),
+        });
+
+        if (data.blocked) {
+          area.innerHTML = `<div class="empty-state"><h3>${data.message}</h3><p><a href="#pricing" class="btn btn-primary" style="margin-top:1rem;">Ver planes</a></p></div>`;
+          return;
+        }
+
+        renderResults(data.results, data.remaining_searches);
+        await loadUser();
+      } catch (err) {
+        showAlert(err.detail || 'Error en la búsqueda');
+        area.innerHTML = '<div class="empty-state"><h3>Error al buscar</h3><p>Intenta de nuevo</p></div>';
+      } finally {
+        btn.disabled = false;
+        btn.textContent = 'Buscar';
+      }
+    }
+
+    function renderResults(results, remaining) {
+      const area = document.getElementById('resultsArea');
+      if (!results.length) {
+        area.innerHTML = '<div class="empty-state"><h3>Sin resultados</h3><p>Intenta con otra búsqueda</p></div>';
+        return;
+      }
+      let html = `<div class="results-header">
+        <span class="results-count">${results.length} resultado${results.length > 1 ? 's' : ''}</span>
+        <span class="remaining-badge">${remaining} búsquedas restantes</span>
+      </div>`;
+      results.forEach((r, i) => {
+        html += `<div class="result-card fade-in" style="animation-delay:${i * .08}s">
+          <div class="result-thumb">
+            <svg width="28" height="28" fill="none" viewBox="0 0 24 24" stroke="currentColor" opacity=".4">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M2.25 21h19.5m-18-18v18m10.5-18v18m6-13.5V21M6.75 6.75h.75m-.75 3h.75m-.75 3h.75m3-6h.75m-.75 3h.75m-.75 3h.75M6.75 21v-3.375c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125V21M3 3h12m-.75 4.5H21m-3.375 0V21" />
+            </svg>
+          </div>
+          <div class="result-body">
+            <h3>${r.title}</h3>
+            <div class="result-location">${r.location || ''}</div>
+            <span class="result-portal">${r.portal || ''}</span>
+          </div>
+          <div class="result-price">${r.price || ''}</div>
+        </div>`;
+      });
+      area.innerHTML = html;
+    }
+
+    // Load pricing
+    async function loadPricing() {
+      try {
+        const data = await apiFetch('/pricing');
+        const grid = document.getElementById('pricingGrid');
+        grid.innerHTML = data.plans.map((plan, i) => `
+          <div class="plan-card fade-in ${i === 1 ? 'featured' : ''}" style="animation-delay:${i * .1}s">
+            <div class="plan-name">${plan.name}</div>
+            <div class="plan-price">$${plan.price} <span>MXN/mes</span></div>
+            <ul class="plan-features">
+              ${plan.features.map(f => `<li>${f}</li>`).join('')}
+            </ul>
+            <button class="btn ${i === 1 ? 'btn-primary' : 'btn-outline'}" style="width:100%"
+              onclick="handleSubscribe('${plan.id}')">
+              Suscribirse
+            </button>
+          </div>
+        `).join('');
+      } catch {
+        document.getElementById('pricingGrid').innerHTML = '<p style="text-align:center;color:var(--text-muted)">No se pudieron cargar los planes</p>';
+      }
+    }
+
+    function handleSubscribe(planId) {
+      if (!token) { openModal('register'); return; }
+      showAlert('Suscripciones disponibles próximamente. Configura tu clave de Stripe.', 'success');
+    }
+
+    // Search on enter
+    document.getElementById('searchInput').addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') doSearch();
+    });
+
+    // Init
+    loadUser();
+    loadPricing();
+  </script>
+</body>
+</html>
