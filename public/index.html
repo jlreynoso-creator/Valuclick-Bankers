@@ -659,7 +659,7 @@
 
   <!-- Footer -->
   <footer class="footer">
-    <span>ValuaClick &copy; 2024 — Comparador inmobiliario</span>
+    <span>ValuaClick &copy; 2025 — Comparador inmobiliario</span>
     <span>Hecho en México</span>
   </footer>
 
@@ -719,6 +719,12 @@
     const API = '/api';
     let token = localStorage.getItem('vc_token');
     let userInfo = null;
+
+    function esc(str) {
+      const d = document.createElement('div');
+      d.textContent = str;
+      return d.innerHTML;
+    }
 
     function openModal(type) {
       closeModals();
@@ -874,7 +880,7 @@
         });
 
         if (data.blocked) {
-          area.innerHTML = `<div class="empty-state"><h3>${data.message}</h3><p><a href="#pricing" class="btn btn-primary" style="margin-top:1rem;">Ver planes</a></p></div>`;
+          area.innerHTML = `<div class="empty-state"><h3>${esc(data.message)}</h3><p><a href="#pricing" class="btn btn-primary" style="margin-top:1rem;">Ver planes</a></p></div>`;
           return;
         }
 
@@ -907,11 +913,11 @@
             </svg>
           </div>
           <div class="result-body">
-            <h3>${r.title}</h3>
-            <div class="result-location">${r.location || ''}</div>
-            <span class="result-portal">${r.portal || ''}</span>
+            <h3>${esc(r.title)}</h3>
+            <div class="result-location">${esc(r.location || '')}</div>
+            <span class="result-portal">${esc(r.portal || '')}</span>
           </div>
-          <div class="result-price">${r.price || ''}</div>
+          <div class="result-price">${esc(r.price || '')}</div>
         </div>`;
       });
       area.innerHTML = html;
@@ -924,13 +930,13 @@
         const grid = document.getElementById('pricingGrid');
         grid.innerHTML = data.plans.map((plan, i) => `
           <div class="plan-card fade-in ${i === 1 ? 'featured' : ''}" style="animation-delay:${i * .1}s">
-            <div class="plan-name">${plan.name}</div>
-            <div class="plan-price">$${plan.price} <span>MXN/mes</span></div>
+            <div class="plan-name">${esc(plan.name)}</div>
+            <div class="plan-price">$${esc(String(plan.price))} <span>MXN/mes</span></div>
             <ul class="plan-features">
-              ${plan.features.map(f => `<li>${f}</li>`).join('')}
+              ${plan.features.map(f => `<li>${esc(f)}</li>`).join('')}
             </ul>
             <button class="btn ${i === 1 ? 'btn-primary' : 'btn-outline'}" style="width:100%"
-              onclick="handleSubscribe('${plan.id}')">
+              onclick="handleSubscribe('${esc(plan.id)}')">
               Suscribirse
             </button>
           </div>
