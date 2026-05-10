@@ -1,0 +1,24 @@
+{
+  "name": "valuaclick-frontend",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "drizzle-kit migrate"
+  },
+  "dependencies": {
+    "@netlify/database": "^0.5.0",
+    "bcryptjs": "^2.4.3",
+    "drizzle-orm": "^1.0.0-beta.22",
+    "jose": "^6.0.11",
+    "stripe": "^17.7.0"
+  },
+  "devDependencies": {
+    "@netlify/functions": "^3.0.0",
+    "@types/bcryptjs": "^2.4.6",
+    "@types/node": "^22.0.0",
+    "drizzle-kit": "^1.0.0-beta.22",
+    "typescript": "^5.7.0"
+  }
+}
