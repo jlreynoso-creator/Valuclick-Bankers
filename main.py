@@ -1,4 +1,6 @@
-from fastapi import FastAPI, Depends, HTTPException, status, Header, Request
+@app.get("/health")
+def health_check():
+    return {"status":"ok","version":"1.0.0"}from fastapi import FastAPI, Depends, HTTPException, status, Header, Request
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, Session
