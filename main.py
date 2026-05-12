@@ -1,55 +1,77 @@
-from fastapi import FastAPI, Depends, HTTPException, status, Request
+from fastapi import FastAPI, HTTPException, Depends, Request, status
 from fastapi.middleware.cors import CORSMiddleware
-from datetime import datetime, timedelta
-from typing import Optional
-from jose import JWTError, jwt
-from passlib.context import CryptContext
 from fastapi.security import OAuth2PasswordBearer
 from pydantic import BaseModel, EmailStr
-import stripe
+from jose import JWTError, jwt
+from passlib.context import CryptContext
+from datetime import datetime, timedelta
+from typing import Optional
 import os
-import logging
+import stripe
+import uvicorn
 
-# Configuración
-SECRET_KEY = os.getenv("SECRET_KEY", "tu-clave-secreta-super-segura-cambiar-en-produccion")
+# =========================================================
+# CONFIG
+# =========================================================
+
+SECRET_KEY = os.getenv(
+    "SECRET_KEY",
+    "CAMBIAR_EN_PRODUCCION_123456789"
+)
+
 ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = 43200
-STRIPE_SECRET_KEY = os.getenv("STRIPE_SECRET_KEY", "sk_test_default")
+ACCESS_TOKEN_EXPIRE_DAYS = 30
 
-# Logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+STRIPE_SECRET_KEY = os.getenv(
+    "STRIPE_SECRET_KEY",
+    ""
+)
 
-# FastAPI App
+stripe.api_key = STRIPE_SECRET_KEY
+
+# =========================================================
+# FASTAPI
+# =========================================================
+
 app = FastAPI(
     title="ValuaClick API",
-    description="API para búsqueda y agregación de propiedades inmobiliarias",
     version="1.0.0"
 )
 
+# =========================================================
 # CORS
+# =========================================================
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_credentials=True,
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# ===== HEALTH CHECK =====
-@app.get("/health")
-def health_check():
-    """Endpoint para verificar que el servidor está activo"""
-    return {
-        "status": "ok",
-        "version": "1.0.0",
-        "service": "valuaclick-api"
-    }
+# =========================================================
+# SECURITY
+# =========================================================
 
-# ===== SCHEMAS =====
-class TokenResponse(BaseModel):
-    access_token: str
-    token_type: str
+pwd_context = CryptContext(
+    schemes=["bcrypt"],
+    deprecated="auto"
+)
+
+oauth2_scheme = OAuth2PasswordBearer(
+    tokenUrl="/api/auth/login"
+)
+
+# =========================================================
+# FAKE DATABASE
+# =========================================================
+
+fake_users_db = {}
+
+# =========================================================
+# MODELS
+# =========================================================
 
 class UserRegister(BaseModel):
     email: EmailStr
@@ -57,143 +79,262 @@ class UserRegister(BaseModel):
     name: str
 
 class UserLogin(BaseModel):
-    email: str
+    email: EmailStr
     password: str
+
+class TokenResponse(BaseModel):
+    access_token: str
+    token_type: str
 
 class SearchRequest(BaseModel):
     query: str
     location: Optional[str] = None
 
-# ===== UTILIDADES =====
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
+# =========================================================
+# UTILS
+# =========================================================
 
-def verify_password(plain_password: str, hashed_password: str) -> bool:
-    """Verifica una contraseña contra su hash"""
-    return pwd_context.verify(plain_password, hashed_password)
-
-def get_password_hash(password: str) -> str:
-    """Genera un hash de contraseña"""
+def hash_password(password: str):
     return pwd_context.hash(password)
 
-def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -> str:
-    """Crea un JWT token"""
-    to_encode = data.copy()
-    if expires_delta:
-        expire = datetime.utcnow() + expires_delta
-    else:
-        expire = datetime.utcnow() + timedelta(minutes=15)
-    to_encode.update({"exp": expire})
-    encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
-    return encoded_jwt
+def verify_password(plain_password, hashed_password):
+    return pwd_context.verify(
+        plain_password,
+        hashed_password
+    )
 
-# ===== ENDPOINTS =====
+def create_access_token(data: dict):
+    to_encode = data.copy()
+
+    expire = datetime.utcnow() + timedelta(
+        days=ACCESS_TOKEN_EXPIRE_DAYS
+    )
+
+    to_encode.update({
+        "exp": expire
+    })
+
+    return jwt.encode(
+        to_encode,
+        SECRET_KEY,
+        algorithm=ALGORITHM
+    )
+
+def decode_token(token: str):
+    try:
+        payload = jwt.decode(
+            token,
+            SECRET_KEY,
+            algorithms=[ALGORITHM]
+        )
+
+        email = payload.get("sub")
+
+        if email is None:
+            return None
+
+        return email
+
+    except JWTError:
+        return None
+
+# =========================================================
+# ROOT
+# =========================================================
+
+@app.get("/")
+async def root():
+    return {
+        "message": "ValuaClick API funcionando",
+        "status": "ok",
+        "docs": "/docs"
+    }
+
+# =========================================================
+# HEALTH CHECK
+# =========================================================
+
+@app.get("/health")
+async def health():
+    return {
+        "status": "healthy"
+    }
+
+# =========================================================
+# REGISTER
+# =========================================================
 
 @app.post("/api/auth/register")
 async def register(user: UserRegister):
-    """Registra un nuevo usuario"""
-    return {
-        "message": "Usuario registrado exitosamente",
+
+    if user.email in fake_users_db:
+        raise HTTPException(
+            status_code=400,
+            detail="El usuario ya existe"
+        )
+
+    hashed_password = hash_password(
+        user.password
+    )
+
+    fake_users_db[user.email] = {
         "email": user.email,
-        "name": user.name
+        "name": user.name,
+        "password": hashed_password
     }
 
-@app.post("/api/auth/login")
+    return {
+        "message": "Usuario registrado correctamente"
+    }
+
+# =========================================================
+# LOGIN
+# =========================================================
+
+@app.post(
+    "/api/auth/login",
+    response_model=TokenResponse
+)
 async def login(user: UserLogin):
-    """Login de usuario"""
-    access_token = create_access_token(
-        data={"sub": user.email},
-        expires_delta=timedelta(days=30)
+
+    db_user = fake_users_db.get(
+        user.email
     )
+
+    if not db_user:
+        raise HTTPException(
+            status_code=401,
+            detail="Credenciales incorrectas"
+        )
+
+    valid_password = verify_password(
+        user.password,
+        db_user["password"]
+    )
+
+    if not valid_password:
+        raise HTTPException(
+            status_code=401,
+            detail="Credenciales incorrectas"
+        )
+
+    access_token = create_access_token({
+        "sub": user.email
+    })
+
     return {
         "access_token": access_token,
         "token_type": "bearer"
     }
 
+# =========================================================
+# CURRENT USER
+# =========================================================
+
 @app.get("/api/user/me")
-async def get_current_user(token: str = Depends(oauth2_scheme)):
-    """Obtiene información del usuario actual"""
+async def get_current_user(
+    token: str = Depends(oauth2_scheme)
+):
+
+    email = decode_token(token)
+
+    if not email:
+        raise HTTPException(
+            status_code=401,
+            detail="Token inválido"
+        )
+
+    user = fake_users_db.get(email)
+
+    if not user:
+        raise HTTPException(
+            status_code=404,
+            detail="Usuario no encontrado"
+        )
+
     return {
-        "email": "user@example.com",
-        "subscription_plan": "free",
-        "search_count": 0,
-        "remaining_free_searches": 2,
-        "can_search": True
+        "email": user["email"],
+        "name": user["name"],
+        "subscription_plan": "free"
     }
+
+# =========================================================
+# SEARCH
+# =========================================================
 
 @app.post("/api/search")
-async def search(request: SearchRequest):
-    """Realiza una búsqueda de propiedades"""
+async def search(
+    request: SearchRequest
+):
     return {
         "results": [],
-        "remaining_searches": 1,
-        "blocked": False,
-        "message": "Búsqueda exitosa"
+        "query": request.query,
+        "location": request.location,
+        "message": "Búsqueda realizada correctamente"
     }
 
-@app.post("/api/subscription/checkout")
-async def create_checkout_session(plan: str):
-    """Crea una sesión de Stripe Checkout"""
-    return {
-        "checkout_url": "https://checkout.stripe.com/pay/example",
-        "session_id": "sess_example"
-    }
-
-@app.get("/api/subscription/status")
-async def subscription_status():
-    """Obtiene el estado de la suscripción del usuario"""
-    return {
-        "subscription_plan": "free",
-        "status": "active",
-        "next_billing_date": None
-    }
+# =========================================================
+# PRICING
+# =========================================================
 
 @app.get("/api/pricing")
-async def get_pricing():
-    """Obtiene los planes de precios disponibles"""
+async def pricing():
+
     return {
         "plans": [
             {
-                "name": "Plan Agente",
+                "name": "Agente",
                 "price": 150,
-                "currency": "MXN",
-                "period": "monthly",
-                "features": ["Búsquedas ilimitadas"]
+                "currency": "MXN"
             },
             {
-                "name": "Plan Despacho",
+                "name": "Despacho",
                 "price": 300,
-                "currency": "MXN",
-                "period": "monthly",
-                "features": ["Búsquedas ilimitadas", "Soporte prioritario"]
+                "currency": "MXN"
             },
             {
-                "name": "Plan Institucional",
+                "name": "Institucional",
                 "price": 1000,
-                "currency": "MXN",
-                "period": "monthly",
-                "features": ["Búsquedas ilimitadas", "Soporte prioritario", "API access"]
+                "currency": "MXN"
             }
         ]
     }
 
-@app.post("/api/webhook/stripe")
-async def stripe_webhook(request: Request):
-    """Webhook para eventos de Stripe"""
-    body = await request.body()
-    return {"status": "received"}
+# =========================================================
+# STRIPE CHECKOUT
+# =========================================================
 
-# ===== ROOT =====
-@app.get("/")
-async def root():
-    """Endpoint raíz"""
+@app.post("/api/subscription/checkout")
+async def checkout(plan: str):
+
     return {
-        "message": "Bienvenido a ValuaClick API",
-        "version": "1.0.0",
-        "docs": "/docs",
-        "health": "/health"
+        "message": "Stripe configurado",
+        "plan": plan
     }
 
+# =========================================================
+# STRIPE WEBHOOK
+# =========================================================
+
+@app.post("/api/webhook/stripe")
+async def stripe_webhook(
+    request: Request
+):
+
+    payload = await request.body()
+
+    return {
+        "received": True
+    }
+
+# =========================================================
+# MAIN
+# =========================================================
+
 if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+
+    uvicorn.run(
+        "main:app",
+        host="0.0.0.0",
+        port=int(os.environ.get("PORT", 8000))
+    )
